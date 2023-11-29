@@ -1,0 +1,193 @@
+--Find the total number of unique customers, pets, and orders in the petfood dataset for years other than 2018. 
+
+SELECT 
+    COUNT(DISTINCT customer_id) AS TotalCustomer, 
+    Count(Distinct pet_id) AS TotalPet, 
+    COUNT(customer_ID) AS TotalOrder
+FROM `PetFoodSales.PetFood`
+WHERE EXTRACT(YEAR FROM TIMESTAMP('2018-08-29 00:00:00 UTC')) = 2018;
+
+--Calculate the Average number of pets per customer with two decimal places
+SELECT 
+    ROUND(COUNT(DISTINCT pet_id) * 1.0 / COUNT(DISTINCT customer_ID), 2) AS Pets_per_Customer
+FROM `PetFoodSales.PetFood`
+WHERE EXTRACT(YEAR FROM TIMESTAMP('2018-08-29 00:00:00 UTC')) = 2018;
+
+--Calculate the total number of customers with more than one pet, the total number of unique customers, and as a percentage of the total number of customers 
+WITH CustomerPetCounts AS (
+  SELECT
+    customer_ID,
+    COUNT(DISTINCT pet_id) AS num_pets
+  FROM
+    `PetFoodSales.PetFood`
+  GROUP BY
+    customer_ID
+)
+
+SELECT
+  COUNT(DISTINCT CASE WHEN num_pets > 1 THEN customer_ID END) AS customers_with_more_than_one_pet,
+  COUNT(DISTINCT customer_ID) AS total_unique_customers,
+  SAFE_DIVIDE(COUNT(DISTINCT CASE WHEN num_pets > 1 THEN customer_ID END), COUNT(DISTINCT customer_ID)) * 100 AS percentage_customers_with_more_than_one_pet
+FROM
+  CustomerPetCounts;
+
+  --What is the distribution of pet breed sizes? 
+  SELECT
+  pet_breed_size,
+  COUNT(*) AS pet_count
+FROM
+  `PetFoodSales.PetFood`
+GROUP BY
+  pet_breed_size
+ORDER BY
+  pet_count DESC;
+
+  --Which month had the highest number of orders, and what is the overall monthly trend?
+  WITH MonthlyOrders AS (
+  SELECT
+    EXTRACT(YEAR FROM TIMESTAMP(order_payment_date)) AS order_year,
+    EXTRACT(MONTH FROM TIMESTAMP(order_payment_date)) AS order_month,
+    COUNT(*) AS order_count
+  FROM
+    `PetFoodSales.PetFood`
+  GROUP BY
+    order_year, order_month
+)
+
+SELECT
+  order_year,
+  order_month,
+  order_count,
+  RANK() OVER (PARTITION BY order_year ORDER BY order_count DESC) AS rank
+FROM
+  MonthlyOrders
+ORDER BY
+  order_year, order_month;
+
+  --What percentage of pets have allergens?
+  WITH AllergenStatus AS (
+    SELECT
+        customer_id,
+        CASE WHEN MAX(CASE WHEN pet_allergen_list IS NOT NULL 
+            THEN 1 ELSE 0 END) = 1 THEN 'Yes' ELSE 'No' END AS Pet_has_Allergen
+    FROM `PetFoodSales.PetFood`
+    WHERE EXTRACT(YEAR FROM TIMESTAMP('2018-08-29 00:00:00 UTC')) = 2018
+    GROUP BY customer_id
+),
+
+
+OrdersPerCustomer AS (
+    SELECT
+        customer_id,
+        COUNT(*) AS Total_Orders
+    FROM `PetFoodSales.PetFood`
+    GROUP BY customer_id
+),
+
+
+TotalCustomersAndOrders AS ( 
+    SELECT
+        a.Pet_has_Allergen,
+        COUNT(DISTINCT o.customer_ID) AS Total_Customers,
+        SUM(o.Total_Orders) AS Total_Orders
+    FROM OrdersPerCustomer o
+    JOIN AllergenStatus a ON o.customer_ID = a.customer_ID
+    GROUP BY a.Pet_has_allergen
+)
+
+
+SELECT
+    tca.Pet_has_Allergen,
+    tca.Total_Customers,
+    tca.Total_Orders,
+    tca.Total_Customers * 1.0 / SUM(tca.Total_Customers) OVER() 
+        AS Percent_Customers,
+    tca.Total_Orders * 1.0 / SUM(tca.Total_Orders) OVER() AS Percent_Orders
+
+FROM TotalCustomersAndOrders tca;
+
+--What does the distribution of customer order activity look like?
+SELECT
+    OrderRange,
+    COUNT(customer_ID) AS CustomerCount
+FROM (
+    SELECT
+        customer_ID,
+        CASE
+            WHEN TotalOrders <= 10 THEN '1-10'
+            WHEN TotalOrders <= 20 THEN '11-20'
+            WHEN TotalOrders <= 30 THEN '21-30'
+            WHEN TotalOrders <= 40 THEN '31-40'
+            WHEN TotalOrders <= 50 THEN '41-50'
+            ELSE '50+'
+        END AS OrderRange
+    FROM (
+        SELECT
+            customer_ID,
+            COUNT(*) AS TotalOrders
+        FROM `PetFoodSales.PetFood`
+        WHERE EXTRACT(YEAR FROM TIMESTAMP('2018-08-29 00:00:00 UTC')) = 2018
+        GROUP BY customer_ID
+    ) AS CustomerOrders
+) AS OrderRanges
+GROUP BY OrderRange
+ORDER BY OrderRange;
+
+--What proportion of orders fall into the superpremium food tier?
+
+WITH petfoodtier AS(
+    SELECT Count(customer_ID) as TotalOrders, pet_food_tier
+    FROM `PetFoodSales.PetFood`
+    WHERE EXTRACT(YEAR FROM TIMESTAMP('2018-08-29 00:00:00 UTC')) = 2018
+    GROUP BY pet_food_tier
+)
+SELECT
+    pf.pet_food_tier, 
+    pf. TotalOrders,
+    pf.TotalOrders * 1.0/sum(pf.TotalOrders) over () *100 AS Percentage
+FROM petfoodtier pf;
+
+--What percentage of orders were placed by customers with an active subscription?
+WITH Subscription_Status AS (
+  SELECT 
+    CASE WHEN pet_has_active_subscription = FALSE THEN 'No' ELSE 'Yes' END AS Subscription_Status,
+    COUNT(customer_id) AS TotalOrders
+  FROM 
+    `PetFoodSales.PetFood`
+  WHERE 
+    EXTRACT(YEAR FROM TIMESTAMP('2018-08-29 00:00:00 UTC')) = 2018
+  GROUP BY 
+    pet_has_active_subscription
+)
+
+-- Select from the CTE and calculate the percentage
+SELECT 
+  Subscription_Status AS SubscriptionStatus,
+  TotalOrders,
+  TotalOrders * 1.0 / SUM(TotalOrders) OVER () * 100 AS Percentage
+FROM 
+  Subscription_Status;
+
+--Which food tier do customers without active subscriptions typically purchase?
+WITH petfoodtier AS (
+  SELECT
+    COUNT(customer_ID) AS TotalOrders,
+    pet_food_tier,
+    pet_has_active_subscription
+  FROM
+    `PetFoodSales.PetFood`
+  WHERE
+    EXTRACT(YEAR FROM TIMESTAMP('2018-08-29 00:00:00 UTC')) = 2018
+  GROUP BY
+    pet_food_tier, pet_has_active_subscription
+)
+
+SELECT
+  pf.pet_food_tier,
+  pf.TotalOrders,
+  pf.TotalOrders * 1.0 / SUM(pf.TotalOrders) OVER (PARTITION BY pf.pet_food_tier) * 100 AS Percentage,
+  CASE WHEN pf.pet_has_active_subscription = FALSE THEN 'No' ELSE 'Yes' END AS subscription_status
+FROM
+  petfoodtier pf
+ORDER BY
+  3 DESC;
